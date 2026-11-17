@@ -8,10 +8,11 @@ A meditation timer that vibrates your phone once per second, so you can keep tra
 - Keeps the screen awake while running (pulses stop if the screen locks).
 
 Live: https://greiye.github.io/meditation-pulse/ (Add to Home screen to install it like an app.)
+Cloudflare Pages (used for the Play Store build): https://meditation-pulse.pages.dev/ once connected. See [PLAY_STORE.md](PLAY_STORE.md).
 
 ## Platform notes
 
 - **Android / Chrome:** full support through the Vibration API.
 - **iPhone / Safari:** Safari has no Vibration API. The page tries the iOS 18+ switch-toggle haptic as a fallback, which is unreliable; use the tick sound instead.
 
-Plain HTML, CSS and JS with no build step. GitHub Pages serves it from the `main` branch root.
+Plain HTML, CSS and JS with no build step. GitHub Pages and Cloudflare Pages both serve the `main` branch root. `_headers` and `.well-known/assetlinks.json` are for Cloudflare Pages and the Android TWA. Privacy policy: `privacy-policy.html`.
