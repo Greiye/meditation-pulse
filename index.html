@@ -34,12 +34,19 @@ body {
   -webkit-tap-highlight-color: transparent; touch-action: manipulation;
 }
 #disc:focus-visible, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-#disc::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--ring); opacity: 0; }
+#disc { --amp: 1; }
+#disc::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: var(--accent); opacity: 0; pointer-events: none; }
+#disc::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--ring); opacity: 0; pointer-events: none; }
+#disc.beat { animation: thump .6s ease-out; }
+#disc.beat::before { animation: glow .7s ease-out; }
 #disc.beat::after { animation: ring .9s ease-out; }
 #disc svg { position: absolute; inset: -8px; width: calc(100% + 16px); height: calc(100% + 16px); transform: rotate(-90deg); pointer-events: none; }
 #disc svg circle { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
-@keyframes ring { from { opacity: .7; transform: scale(1); } to { opacity: 0; transform: scale(1.18); } }
-@media (prefers-reduced-motion: reduce) { #disc.beat::after { animation: none; } #disc svg circle { transition: none; } }
+/* --amp (0..1) scales every beat effect, so the fade-out dims the visuals with the haptics */
+@keyframes thump { 0% { transform: scale(1); } 18% { transform: scale(calc(1 + .045 * var(--amp))); } 100% { transform: scale(1); } }
+@keyframes glow { 0% { opacity: calc(.22 * var(--amp)); } 100% { opacity: 0; } }
+@keyframes ring { from { opacity: calc(.75 * var(--amp)); transform: scale(1); } to { opacity: 0; transform: scale(calc(1 + .2 * var(--amp))); } }
+@media (prefers-reduced-motion: reduce) { #disc.beat, #disc.beat::after { animation: none; } #disc svg circle { transition: none; } }
 #time { font-size: clamp(44px, 14vw, 72px); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
 .chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 360px; }
 .chip {
@@ -50,7 +57,7 @@ body {
 .chip input { width: 3ch; font: inherit; color: var(--fg); background: transparent; border: none; border-bottom: 1px solid var(--muted); text-align: center; padding: 0; }
 body.running .chips { opacity: .35; pointer-events: none; }
 #status { color: var(--muted); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; text-align: center; max-width: 34ch; line-height: 1.6; min-height: 3.2em; }
-.opts { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; color: var(--muted); font-size: 13px; }
+.opts { display: flex; gap: 10px 20px; max-width: 420px; flex-wrap: wrap; justify-content: center; color: var(--muted); font-size: 13px; }
 .opts label { display: flex; gap: 8px; align-items: center; }
 .opts input { accent-color: var(--accent); }
 #ios { position: absolute; left: -9999px; }
@@ -75,6 +82,8 @@ footer { color: var(--muted); opacity: .6; font-size: 10px; letter-spacing: .06e
 <div class="opts">
   <label><input type="checkbox" id="minute" checked> Long buzz each minute</label>
   <label><input type="checkbox" id="tick"> Soft tick sound</label>
+  <label><input type="checkbox" id="fade" checked> Fade out the last 10 pulses</label>
+  <label><input type="checkbox" id="silent"> Silent ending</label>
 </div>
 <div id="status">Pick a duration or Open, then tap the circle.</div>
 <footer>Mobile browser app. Best in Chrome on Android.<br>&copy; 2026 Greiye. All rights reserved.</footer>
@@ -84,7 +93,7 @@ footer { color: var(--muted); opacity: .6; font-size: 10px; letter-spacing: .06e
 (() => {
   const $ = id => document.getElementById(id);
   const disc = $('disc'), label = $('label'), timeEl = $('time'), status = $('status'), arc = $('arc');
-  const minuteOpt = $('minute'), tickOpt = $('tick'), iosLabel = $('ios'), custom = $('custom');
+  const minuteOpt = $('minute'), tickOpt = $('tick'), fadeOpt = $('fade'), silentOpt = $('silent'), iosLabel = $('ios'), custom = $('custom');
   const chips = [...document.querySelectorAll('.chip')];
   const canVibrate = typeof navigator.vibrate === 'function';
   let running = false, t0 = 0, n = 0, total = 0, timer = null, wake = null, ac = null, minutes = 0;
@@ -107,6 +116,13 @@ footer { color: var(--muted); opacity: .6; font-size: 10px; letter-spacing: .06e
     else { const c = chips.find(c => c.dataset.min === saved); if (c) select(c); }
   }
 
+  const FADE = 10;
+  [minuteOpt, tickOpt, fadeOpt, silentOpt].forEach(o => {
+    const v = store('pulse.' + o.id);
+    if (v === '1' || v === '0') o.checked = v === '1';
+    o.addEventListener('change', () => store('pulse.' + o.id, o.checked ? '1' : '0'));
+  });
+
   function haptic(pattern) {
     if (canVibrate) { try { navigator.vibrate(pattern); } catch (e) {} }
     else { const taps = Array.isArray(pattern) ? Math.ceil(pattern.length / 2) : 1; for (let i = 0; i < taps; i++) setTimeout(() => { try { iosLabel.click(); } catch (e) {} }, i * 140); }
@@ -127,12 +143,18 @@ footer { color: var(--muted); opacity: .6; font-size: 10px; letter-spacing: .06e
     if (!running) return;
     n++;
     if (total && n >= total) { show(); finish(); return; }
-    const long = minuteOpt.checked && n % 60 === 0;
-    haptic(long ? [60, 80, 60, 80, 60] : 45);
-    tone(long ? 520 : 880, 0.08, 0.12);
+    // fade-out: the last FADE pulses wane from full strength toward nothing (vibrate() has no amplitude, so shorten it)
+    const left = total - n, amp = total && fadeOpt.checked && left <= FADE ? left / (FADE + 1) : 1;
+    const long = minuteOpt.checked && n % 60 === 0 && amp === 1;
+    haptic(long ? [60, 80, 60, 80, 60] : Math.max(8, Math.round(45 * amp)));
+    tone(long ? 520 : 880, 0.08, 0.12 * amp);
     show();
-    disc.classList.remove('beat'); void disc.offsetWidth; disc.classList.add('beat');
+    pulse(amp);
     timer = setTimeout(beat, Math.max(0, t0 + (n + 1) * 1000 - performance.now()));
+  }
+  function pulse(amp) {
+    disc.style.setProperty('--amp', amp);
+    disc.classList.remove('beat'); void disc.offsetWidth; disc.classList.add('beat');
   }
   async function start() {
     running = true; n = 0; t0 = performance.now(); total = minutes * 60;
@@ -141,7 +163,7 @@ footer { color: var(--muted); opacity: .6; font-size: 10px; letter-spacing: .06e
     status.textContent = (total ? 'Counting down ' + fmt(total) + '. ' : 'Counting up. ') + (canVibrate ? 'Pulsing every second.' : 'No vibration in this browser. Turn on the tick sound.');
     try { if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)(); ac.resume(); } catch (e) {}
     try { wake = await navigator.wakeLock?.request('screen'); } catch (e) { wake = null; }
-    haptic(45);
+    haptic(45); pulse(1);
     timer = setTimeout(beat, 1000);
   }
   function release() {
@@ -157,9 +179,11 @@ footer { color: var(--muted); opacity: .6; font-size: 10px; letter-spacing: .06e
   }
   function finish() {
     release();
-    haptic([500, 250, 500, 250, 900]);
-    // the end chime plays whenever audio is unlocked, even with ticks off
-    [0, 0.45, 0.9].forEach(d => setTimeout(() => tone(660, 1.2, 0.18, true), d * 1000));
+    if (!silentOpt.checked) {
+      haptic([500, 250, 500, 250, 900]);
+      // the end chime plays whenever audio is unlocked, even with ticks off
+      [0, 0.45, 0.9].forEach(d => setTimeout(() => tone(660, 1.2, 0.18, true), d * 1000));
+    }
     status.textContent = "Time's up: " + fmt(total) + '. Tap to go again.';
   }
   disc.addEventListener('click', () => running ? stop() : start());

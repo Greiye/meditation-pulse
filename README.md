@@ -4,7 +4,11 @@ A meditation timer that vibrates your phone once per second, so you can keep tra
 
 - Tap the circle to start, tap again to stop.
 - **Open** counts up; **1 / 5 / 10 / 20 min** or a custom value counts down and ends with three long buzzes and a chime.
+- The circle pulses with every vibration.
 - Optional longer buzz at each minute and a soft tick sound.
+- **Fade out the last 10 pulses** (on by default): the final ten pulses get shorter, quieter and dimmer until time is up.
+- **Silent ending**: skip the closing buzzes and chime; the timer just stops.
+- Settings are remembered between visits.
 - Keeps the screen awake while running (pulses stop if the screen locks).
 
 Live: https://greiye.github.io/meditation-pulse/ (Add to Home screen to install it like an app.)
